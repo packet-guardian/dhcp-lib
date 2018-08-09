@@ -6,17 +6,11 @@ package dhcp
 
 import (
 	"bufio"
-	"encoding/binary"
-	"errors"
 	"fmt"
 	"net"
 	"os"
 	"strings"
 	"time"
-
-	"strconv"
-
-	"github.com/onesimus-systems/dhcp4"
 )
 
 // ParseFile takes the file name to a configuration file.
@@ -254,9 +248,6 @@ mainLoop:
 			return nil, fmt.Errorf("Unexpected token %s on line %d in subnet", tok.string(), tok.line)
 		}
 	}
-	if _, ok := sub.settings.options[dhcp4.OptionSubnetMask]; !ok {
-		sub.settings.options[dhcp4.OptionSubnetMask] = []byte(sub.net.Mask)
-	}
 	return sub, nil
 }
 
@@ -330,11 +321,7 @@ func (p *parser) parseSetting(setBlock *settings) error {
 	case COMMENT, EOF:
 		return nil
 	case OPTION:
-		code, data, err := p.parseOption()
-		if err != nil {
-			return err
-		}
-		setBlock.options[code] = data
+		p.parseOption()
 		return nil
 	case DEFAULT_LEASE_TIME:
 		tokn := p.l.next()
@@ -362,78 +349,4 @@ func (p *parser) parseSetting(setBlock *settings) error {
 	return fmt.Errorf("Unexpected token %s on line %d in settings", tok.string(), tok.line)
 }
 
-func (p *parser) parseOption() (dhcp4.OptionCode, []byte, error) {
-	// Consume all tokens to the next line end
-	tokens := p.l.untilNext(EOL)
-	if len(tokens) < 2 { // An option must be at least a name and one parameter
-		return 0, nil, errors.New("Options require a name and value")
-	}
-
-	n := tokens[0] // The first token is the name of the option
-	if n.token != STRING {
-		return 0, nil, fmt.Errorf("Invalid option name on line %d", n.line)
-	}
-
-	option := n.value.(string)
-	block, exists := options[option]
-	if !exists {
-		// Manual options take the form "option-xxx" where xxx is an integer < 255
-		p := strings.Split(option, "-")
-		if len(p) != 2 {
-			return 0, nil, fmt.Errorf("Option %s is not supported on line %d", option, n.line)
-		}
-		code, err := strconv.Atoi(p[1])
-		if err != nil || code > 255 {
-			return 0, nil, fmt.Errorf("Custom option code %s is not valid on line %d", p[1], n.line)
-		}
-		// Use a custom option block that allows any parameters and any number of them
-		block = &dhcpOptionBlock{code: dhcp4.OptionCode(code), schema: anySchema}
-	}
-
-	if block.schema.multi != oneOrMore && len(tokens)-1 > int(block.schema.multi) {
-		return 0, nil, fmt.Errorf("Option %s requires %d parameters", option, block.schema.multi)
-	}
-
-	var optionData []byte
-	for _, tok := range tokens[1:] {
-		if block.schema.token != ANY && tok.token != block.schema.token {
-			return 0, nil, fmt.Errorf("Expected %s, got %s on line %d", block.schema.token.string(), tok.token.string(), tok.line)
-		}
-		switch t := tok.value.(type) {
-		case uint64:
-			buf := make([]byte, 8)
-			written := binary.PutUvarint(buf, t)
-			if written > int(block.schema.maxlen) {
-				return 0, nil, fmt.Errorf("Number is too big on line %s", tok.line)
-			}
-			optionData = append(optionData, buf...)
-		case int64:
-			buf := make([]byte, 8)
-			written := binary.PutVarint(buf, t)
-			if written > int(block.schema.maxlen) {
-				return 0, nil, fmt.Errorf("Number is too big on line %s", tok.line)
-			}
-			optionData = append(optionData, buf...)
-		case string:
-			optionData = append(optionData, []byte(t)...)
-		case bool:
-			if t {
-				optionData = append(optionData, byte(1))
-			} else {
-				optionData = append(optionData, byte(0))
-			}
-		case []byte:
-			optionData = append(optionData, t...)
-		case net.IP:
-			optionData = append(optionData, []byte(t.To4())...)
-		}
-	}
-
-	if block.schema.maxlen != unlimited && len(optionData) > int(block.schema.maxlen) {
-		return 0, nil, fmt.Errorf("Incorrect option length on line %d", n.line)
-	}
-	if len(optionData)%block.schema.multipleOf != 0 {
-		return 0, nil, fmt.Errorf("Incorrect option length on line %d", n.line)
-	}
-	return block.code, optionData, nil
-}
+func (p *parser) parseOption() { p.l.untilNext(EOL) }

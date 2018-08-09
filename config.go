@@ -5,7 +5,6 @@
 package dhcp
 
 import (
-	"fmt"
 	"net"
 )
 
@@ -19,14 +18,6 @@ func newConfig() *Config {
 	return &Config{
 		global:   newGlobal(),
 		networks: make(map[string]*network),
-	}
-}
-
-func (c *Config) print() {
-	fmt.Println("DHCP Configuration")
-	c.global.print()
-	for _, n := range c.networks {
-		n.print()
 	}
 }
 
