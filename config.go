@@ -35,5 +35,5 @@ func (c *Config) Networks() []string {
 	for n := range c.networks {
 		networks = append(networks, n)
 	}
-	return n
+	return networks
 }
